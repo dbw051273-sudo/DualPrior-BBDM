@@ -1,0 +1,107 @@
+# Brownian Bridge Diffusion Model Template (Pixel Space)
+# ===================== 针对 Swin-UNet (伪装版) 优化的全量配置 =====================
+
+runner: "BBDMRunner"
+training:
+  n_epochs: 200
+  n_steps: 400000
+  save_interval: 4       # Swin模型较大，建议10个epoch存一次
+  sample_interval: 4
+  validation_interval: 4
+  accumulate_grad_batches: 4
+  device: [0]             # 确认你的 GPU ID
+  use_DDP: False
+
+testing:
+  clip_denoised: True
+  sample_num: 1
+  sample_task: 2
+  noise_level: 0
+
+data:
+  dataset_name: 'brain-exp'
+  dataset_type: 'custom_aligned'
+  dataset_config:
+    dataset_path: '/media/simon/f660aae3-bbc5-4f38-976a-d622ee37ae7c/mali/user1/bbdm-pi2he/gray/Brain'
+    image_size: 256
+    channels: 3
+    to_normal: True
+    flip: False
+    invert_cond: True
+  train:
+    batch_size: 4         # 如果报显存溢出(OOM)，请改为 2 或 1
+    shuffle: True
+  val:
+    batch_size: 4
+    shuffle: True
+  test:
+    batch_size: 4
+model:
+  model_name: "bremodel-braindata"
+  model_type: "BBDM"      # 像素空间模式
+  latent_before_quant_conv: False
+  normalize_latent: False
+  only_load_latent_mean_std: False
+  model_load_path:
+  optim_sche_load_path:
+  EMA:
+    use_ema: True
+    ema_decay: 0.995
+    update_ema_interval: 8
+    start_ema_step: 1000
+
+  BB:
+    optimizer:
+      weight_decay: 0.000
+      optimizer: 'Adam'
+      lr: 1.e-4
+      beta1: 0.9
+
+    # 🚀 修正 2: 将 lr_scheduler 移出 params 节点，直接放在 BB 下
+    lr_scheduler:
+      factor: 0.5
+      patience: 3000
+      threshold: 0.0001
+      cooldown: 3000
+      min_lr: 5.e-7
+
+    params:
+      mt_type: 'sin'
+      objective: 'grad'
+      loss_type: 'l1'
+      skip_sample: True
+      sample_type: 'linear'
+      sample_step: 200
+      num_timesteps: 1000
+      eta: 1.0
+      max_var: 1.0
+      
+      # 以下参数对应 BrownianBridgeModel.py 内部调用
+      task_weights: [1.0, 0.8]
+      noise_level: 0
+
+      # 🚀 修正 3: 对齐 Swin-UNet (UNetModel) 内部参数名 🚀
+      UNetParams:
+        # 基础对齐参数 (必须完全匹配代码中的 image_size, in_channels, model_channels)
+        image_size: 256        # 像素空间模式设为 256
+        in_channels: 6         # 输入为 3(噪声) + 3(PI图) = 6 通道
+        model_channels: 256    # 对应代码里的 embed_dim
+        num_classes: 3         # 输出为 3 通道 H&E 图像
+        latent_mode: False
+        # Swin 架构核心
+        patch_size: 2
+        window_size: 8
+        depths: [2, 2, 18, 2]
+#        depths_decoder: [1, 2, 2, 2]
+        num_heads: [4, 8, 16, 32]
+        
+        # 训练稳定性
+        mlp_ratio: 4.0
+        qkv_bias: True
+        drop_rate: 0.0
+        attn_drop_rate: 0.0
+        drop_path_rate: 0.05
+        ape: True
+        patch_norm: True
+        final_upsample: "expand_first"
+        condition_key: "SpatialRescaler"

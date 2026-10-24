@@ -1,0 +1,164 @@
+data:
+  dataset_config:
+    channels: 3
+    dir_cond: input
+    dir_target: target
+    flip: false
+    image_size: 256
+    invert_cond: true
+    organs:
+    - label: 0
+      path: C:/Users/felix/Desktop/Datasets_processed/liver
+    - label: 1
+      path: C:/Users/felix/Desktop/Datasets_processed/Kidney
+    - label: 2
+      path: C:/Users/felix/Desktop/Datasets_processed/Brain
+    per_organ_limit: null
+    to_normal: true
+  dataset_name: ws300-e3
+  dataset_type: multi_organ
+  test:
+    batch_size: 1
+  train:
+    batch_size: 4
+    shuffle: true
+  val:
+    batch_size: 1
+    shuffle: true
+model:
+  BB:
+    lr_scheduler:
+      cooldown: 3000
+      factor: 0.5
+      min_lr: 5.0e-07
+      patience: 3000
+      threshold: 0.0001
+    optimizer:
+      beta1: 0.9
+      lr: 0.0001
+      optimizer: Adam
+      weight_decay: 0.0
+    params:
+      UNetParams:
+        ape: true
+        attn_drop_rate: 0.0
+        condition_key: SpatialRescaler
+        depths:
+        - 4
+        - 4
+        - 4
+        - 2
+        drop_path_rate: 0.05
+        drop_rate: 0.0
+        final_upsample: expand_first
+        image_size: 256
+        in_channels: 6
+        latent_mode: false
+        mlp_ratio: 4.0
+        model_channels: 256
+        num_classes: 3
+        num_heads:
+        - 4
+        - 8
+        - 16
+        - 32
+        patch_norm: true
+        patch_size: 2
+        qkv_bias: true
+        window_size: 8
+      adv_start_step: 18000
+      adv_weight: 0.05
+      aux_loss_start_steps:
+        manifold: 1000000000
+        selfconsist: 1000000000
+        struct: 1000000000
+      conch_checkpoint: C:/Users/felix/.cache/huggingface/hub/models--MahmoodLab--CONCH/snapshots/f9ca9f877171a28ade80228fb195ac5d79003357/pytorch_model.bin
+      dual_injection_layers:
+      - 1
+      - 2
+      eta: 1.0
+      faiss_bank_dir: C:/Users/felix/Desktop/bbdm+swin跨器官/核心代码
+      grl_gamma: 10.0
+      grl_total_steps: 162000
+      loss_type: l1
+      lpips_ramp_steps: 90000
+      lpips_start_step: 180000
+      lpips_t_max: 400
+      lpips_weight: 0.0
+      max_var: 1.0
+      mt_type: sin
+      noise_level: 0
+      num_organs: 3
+      num_timesteps: 1000
+      objective: grad
+      sample_step: 20
+      sample_type: linear
+      skip_sample: true
+      stain_weight: 0.0
+      style_dim: 512
+      task_weights:
+      - 1.0
+      - 0.8
+      uni_context_dim: 1024
+      uni_cross_attn_layers:
+      - 0
+      - 1
+      uni_input_mode: pi
+      use_dual_injection: true
+      use_faiss: true
+      use_grl: false
+      use_uni: false
+      warmup_steps: 4000
+      style_only: true
+  EMA:
+    apply_during_training: false
+    ema_decay: 0.99
+    start_ema_step: 90000
+    update_ema_interval: 8
+    use_ema: true
+  latent_before_quant_conv: false
+  model_load_path: null
+  model_name: ABL-NOUNI
+  model_type: BBDM
+  normalize_latent: false
+  only_load_latent_mean_std: false
+  optim_sche_load_path: null
+result:
+  ckpt_path: results/ws300-e3/ABL-NOUNI/checkpoint
+  image_path: results/ws300-e3/ABL-NOUNI/image
+  log_path: results/ws300-e3/ABL-NOUNI/log
+  result_path: results/ws300-e3/ABL-NOUNI/
+  sample_path: results/ws300-e3/ABL-NOUNI/samples
+  sample_to_eval_path: results/ws300-e3/ABL-NOUNI/sample_to_eval
+runner: BBDMRunner
+testing:
+  clip_denoised: true
+  noise_level: 0
+  sample_num: 1
+  sample_task: 0
+training:
+  accumulate_grad_batches: 1
+  device:
+  - cuda:0
+  grad_clip_norm: 5.0
+  lr_factors:
+  - 1.0
+  - 0.5
+  - 0.25
+  - 0.1
+  lr_milestones:
+  - 225000
+  - 315000
+  - 405000
+  n_epochs: 301
+  n_steps: 190000
+  num_workers: 8
+  sample_freq: 10000
+  sample_interval: 1
+  save_freq: 10000
+  save_interval: 1
+  skip_final_validation: true
+  task1_end_step: 90000
+  use_DDP: false
+  use_amp: true
+  validation_interval: 999

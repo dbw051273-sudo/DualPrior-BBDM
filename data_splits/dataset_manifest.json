@@ -1,0 +1,211 @@
+{
+  "dataset_name": "Multi-Organ Paired Phase-Imaging (PI) to H&E Virtual Staining Benchmark",
+  "access_policy": "Full raw dataset (15,222 paired patches across 4 organs) is an in-house institutional dataset and is available from the corresponding author and advisor upon reasonable academic request. Exact split file lists and 2 demo pairs per organ are provided in this repository for pipeline verification and auditability.",
+  "resolution": "1024x1024 raw (resized/cropped to 256x256 in training and evaluation)",
+  "organs": {
+    "liver": {
+      "role": "Source Donor",
+      "native_pi_polarity": "negative (dark background, bright nuclei)",
+      "splits": {
+        "train": {
+          "num_pairs": 3000,
+          "input_Matches_target": true,
+          "first_5_files": [
+            "train_001.png",
+            "train_002.png",
+            "train_003.png",
+            "train_004.png",
+            "train_007.png"
+          ],
+          "last_5_files": [
+            "train_995.png",
+            "train_996.png",
+            "train_997.png",
+            "train_998.png",
+            "train_999.png"
+          ]
+        },
+        "val": {
+          "num_pairs": 279,
+          "input_Matches_target": true,
+          "first_5_files": [
+            "train_006.png",
+            "train_055.png",
+            "train_076.png",
+            "train_093.png",
+            "train_104.png"
+          ],
+          "last_5_files": [
+            "train_932.png",
+            "train_942.png",
+            "train_950.png",
+            "train_978.png",
+            "train_982.png"
+          ]
+        },
+        "test": {
+          "num_pairs": 750,
+          "input_Matches_target": true,
+          "first_5_files": [
+            "train_005.png",
+            "train_012.png",
+            "train_013.png",
+            "train_018.png",
+            "train_023.png"
+          ],
+          "last_5_files": [
+            "train_976.png",
+            "train_977.png",
+            "train_981.png",
+            "train_987.png",
+            "train_992.png"
+          ]
+        }
+      }
+    },
+    "Kidney": {
+      "role": "Source Donor",
+      "native_pi_polarity": "positive (bright background, dark nuclei)",
+      "splits": {
+        "train": {
+          "num_pairs": 2000,
+          "input_Matches_target": true,
+          "first_5_files": [
+            "train_001.png",
+            "train_003.png",
+            "train_004.png",
+            "train_005.png",
+            "train_006.png"
+          ],
+          "last_5_files": [
+            "train_990.png",
+            "train_992.png",
+            "train_993.png",
+            "train_994.png",
+            "train_996.png"
+          ]
+        },
+        "val": {
+          "num_pairs": 194,
+          "input_Matches_target": true,
+          "first_5_files": [
+            "train_010.png",
+            "train_033.png",
+            "train_060.png",
+            "train_082.png",
+            "train_1005.png"
+          ],
+          "last_5_files": [
+            "train_963.png",
+            "train_986.png",
+            "train_991.png",
+            "train_998.png",
+            "train_999.png"
+          ]
+        },
+        "test": {
+          "num_pairs": 800,
+          "input_Matches_target": true,
+          "first_5_files": [
+            "train_002.png",
+            "train_008.png",
+            "train_009.png",
+            "train_014.png",
+            "train_017.png"
+          ],
+          "last_5_files": [
+            "train_977.png",
+            "train_979.png",
+            "train_981.png",
+            "train_995.png",
+            "train_997.png"
+          ]
+        }
+      }
+    },
+    "Brain": {
+      "role": "Source Donor",
+      "native_pi_polarity": "positive (bright background, dark nuclei)",
+      "splits": {
+        "train": {
+          "num_pairs": 4000,
+          "input_Matches_target": true,
+          "first_5_files": [
+            "train_001.png",
+            "train_002.png",
+            "train_003.png",
+            "train_004.png",
+            "train_005.png"
+          ],
+          "last_5_files": [
+            "train_994.png",
+            "train_996.png",
+            "train_997.png",
+            "train_998.png",
+            "train_999.png"
+          ]
+        },
+        "val": {
+          "num_pairs": 863,
+          "input_Matches_target": true,
+          "first_5_files": [
+            "train_027.png",
+            "train_033.png",
+            "train_043.png",
+            "train_046.png",
+            "train_069.png"
+          ],
+          "last_5_files": [
+            "train_961.png",
+            "train_963.png",
+            "train_970.png",
+            "train_976.png",
+            "train_992.png"
+          ]
+        },
+        "test": {
+          "num_pairs": 1000,
+          "input_Matches_target": true,
+          "first_5_files": [
+            "train_007.png",
+            "train_013.png",
+            "train_021.png",
+            "train_023.png",
+            "train_028.png"
+          ],
+          "last_5_files": [
+            "train_981.png",
+            "train_982.png",
+            "train_984.png",
+            "train_988.png",
+            "train_995.png"
+          ]
+        }
+      }
+    },
+    "Breast": {
+      "role": "Held-Out Zero-Shot Target",
+      "native_pi_polarity": "positive (bright background, dark nuclei)",
+      "splits": {
+        "test_blind": {
+          "num_pairs": 5636,
+          "input_Matches_target": true,
+          "first_5_files": [
+            "file_001.png",
+            "file_002.png",
+            "file_003.png",
+            "file_004.png",
+            "file_005.png"
+          ],
+          "last_5_files": [
+            "file_995.png",
+            "file_996.png",
+            "file_997.png",
+            "file_998.png",
+            "file_999.png"
+          ]
+        }
+      }
+    }
+  }
+}

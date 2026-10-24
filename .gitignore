@@ -1,0 +1,31 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Checkpoints & large feature caches (upload to HuggingFace / Baidu Netdisk / Zenodo instead)
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.npz
+*.npy
+ckpt_cross/
+feat_cache_dir/
+feat_cache_kidney/
+results/
+
+# Private full datasets (keep local; only commit data_splits/ and optional Datasets_demo/)
+Datasets_processed/
+eval_liver/
+eval_kidney/
+eval_brain/
+gens_*/
+official_eval/
+official_eval_indomain/
+
+# Logs & temporary files
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
