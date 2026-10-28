@@ -83,6 +83,12 @@ class MultiOrganDataset(Dataset):
         self.photometric_aug = getattr(dataset_config, 'photometric_aug', False) and stage == 'train'
         # 几何增广: 成对同参数 rot90+水平翻转(病理图无先天朝向), 仅训练期; 与反转可交换
         self.geo_aug = getattr(dataset_config, 'geo_aug', False) and stage == 'train'
+        # 染色物理增广: 基于 Beer-Lambert/Ruifrok 解耦，仅训练期作用于目标 H&E 图像
+        self.stain_aug = getattr(dataset_config, 'stain_aug', False) and stage == 'train'
+        if self.stain_aug:
+            from .stain_aug import RuifrokStainAugmentor
+            stain_p = getattr(dataset_config, 'stain_aug_p', 0.5)
+            self.stain_augmentor = RuifrokStainAugmentor(p=stain_p)
         # E5: 逐图 PI 标准化([0,1]域) —— 把 liver 从偏暗带(-0.02)拉进亮器官带(-0.50),
         # Breast 评估输入几乎不变; 与 photometric_aug 互斥(勿同开)
         self.standardize_cond = getattr(dataset_config, 'standardize_cond', False)
@@ -133,6 +139,8 @@ class MultiOrganDataset(Dataset):
             if random.random() < 0.5:
                 target_img = torch.flip(target_img, (2,))
                 cond_img = torch.flip(cond_img, (2,))        # 一起翻
+        if self.stain_aug:
+            target_img = self.stain_augmentor(target_img)
         if self.standardize_cond:
             mu, sig = cond_img.mean(), cond_img.std().clamp_min(0.05)
             cond_img = ((cond_img - mu) / sig * 0.22 + 0.75).clamp(0., 1.)

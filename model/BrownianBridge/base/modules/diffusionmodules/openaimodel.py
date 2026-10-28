@@ -1794,6 +1794,17 @@ class UNetModel(nn.Module):
         self.dual_injection_layers = dual_injection_layers
         self.style_dim = style_dim
 
+        # MixStyle (ICLR 2021) 域泛化特征解耦模块
+        self.use_mixstyle = kwargs.get("use_mixstyle", False)
+        if self.use_mixstyle:
+            from model.BrownianBridge.mixstyle import MixStyle
+            self.mixstyle = MixStyle(
+                p=kwargs.get("mixstyle_p", 0.5),
+                alpha=kwargs.get("mixstyle_alpha", 0.1)
+            )
+        else:
+            self.mixstyle = None
+
         # 时间嵌入层
         time_embed_dim = self.embed_dim * 4
         self.time_embed = nn.Sequential(
@@ -2007,10 +2018,16 @@ class UNetModel(nn.Module):
 
         # 编码器前向
         x_downsample = []
-        for layer in self.layers:
+        for inx, layer in enumerate(self.layers):
             x_downsample.append(x)
             x = layer(x)
+            if self.use_mixstyle and self.mixstyle is not None and inx == 0:
+                x = self.mixstyle(x)
         x = self.norm(x)
+        if self.training:
+            self.last_bottleneck = x.mean(dim=1)
+        else:
+            self.last_bottleneck = None
 
         # 解码器前向(uni_feat/f_spatial/f_style 下发给 BasicLayer_up; PatchExpand 不接收)
         for inx, layer_up in enumerate(self.layers_up):

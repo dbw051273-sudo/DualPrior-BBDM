@@ -14,10 +14,18 @@ This repository provides:
    - **Backbone**: 303M-parameter Swin-UNet Brownian Bridge Diffusion Model (`BBDM`) modeling deterministic boundary-pinned trajectories between PI inputs and H&E targets.
    - **Structural Prior (`SpatialPriorInjector`)**: Dense spatial tokens from a frozen pathology foundation model (**UNI**) injected via zero-initialized $1\times1$ convolutions (ControlNet-style), preventing nuclear topology collapse on unseen organs ($-4.23\text{ dB}$ PSNR if ablated).
    - **Texture Prior (`TextureCrossAttention`)**: Self-queried $k$-NN prototype retrieval ($k=8$) over a **source-only CONCH memory bank** ($N=144,000$ patches across 3 source organs) using Gibbs-kernel cross-attention.
-2. **Two-Factor Controlled Attribution (Polarity Alignment & Stain Statistics Calibration)**:
+2. **Controlled Domain Generalization (DG) Benchmarks (6 Major Categories)**:
+   - Systematically reproduces 6 classical DG baseline families on the identical `Swin-UNet BBDM` backbone under single-variable controlled 190,000-step training:
+     - **Class 1 (Data Augmentation)**: *StainAug* (Tellez et al., IEEE TMI 2019) Beer–Lambert stain perturbation;
+     - **Class 2 (Feature Alignment)**: *DANN* (Ganin et al., JMLR 2016) Gradient Reversal Layer on 2048-dim bottleneck;
+     - **Class 3 (Feature Disentanglement)**: *MixStyle* (Zhou et al., ICLR 2021) feature statistics mixing;
+     - **Class 4 (Foundation Model Baseline)**: *UNIStainNet* multi-modal cross-attention;
+     - **Class 5 (Meta-Learning)**: *MLDG* (Li et al., AAAI 2018) episodic virtual-test optimization;
+     - **Class 6 (Flat Minima Optimization)**: *SWAD* (Cha et al., NeurIPS 2021) stochastic dense weight averaging.
+3. **Two-Factor Controlled Attribution (Polarity Alignment & Stain Statistics Calibration)**:
    - **Stage I (Zero-Shot Input Polarity Alignment)**: Aligning donor-recipient optical contrast polarity lifts the single-organ Liver donor on unseen Breast from `8.23 dB` to `20.04 dB` without any retraining or target H&E access.
    - **Stage II (Unpaired Site Reference Calibration)**: Lightweight Beer–Lambert optical density (OD) affine calibration using $n \ge 3$ unpaired archive H&E slides compresses all 4 donor models (`Liver`, `Kidney`, `Brain`, `Joint`) into a `22.01–23.39 dB` band ($\Delta < 1.4\text{ dB}$).
-3. **4-Level Automated Pathology Evaluation Suite (`official_eval.py`)**:
+4. **4-Level Automated Pathology Evaluation Suite (`fast_official_eval.py`)**:
    - **(1) Pixel & Photometric Fidelity**: PSNR, SSIM, LPIPS;
    - **(2) Distributional Realism**: Full-sample & patch-level FID, KID;
    - **(3) Nuclear Topology & Optical Density**: **Cellpose** instance segmentation nuclear mask **Dice** and Beer–Lambert Hematoxylin-channel **PCC**;
@@ -37,6 +45,12 @@ DualPrior-BBDM-GitHub/
 │   ├── base_liver_server.yaml      # Single-organ Donor: Liver-only (190k steps)
 │   ├── base_kidney_server.yaml     # Single-organ Donor: Kidney-only (190k steps)
 │   ├── base_brain_server.yaml      # Single-organ Donor: Brain-only (190k steps)
+│   ├── stainaug_190k_server.yaml   # DG Class 1: StainAug (Optical Density stain jitter)
+│   ├── dann_190k_server.yaml       # DG Class 2: DANN (GRL + 3-Organ Domain Discriminator)
+│   ├── mixstyle_190k_server.yaml   # DG Class 3: MixStyle (Feature statistics mixing)
+│   ├── unistain_190k_server.yaml   # DG Class 4: UNIStainNet (Cross-modal foundation prior)
+│   ├── mldg_190k_server.yaml       # DG Class 5: MLDG (Meta-learning domain generalization)
+│   ├── swad_190k_server.yaml       # DG Class 6: SWAD (Dense flat-minima weight averaging)
 │   ├── i2sb_joint_190k.yaml        # Baseline: I2SB (Schrödinger Bridge, 190k steps)
 │   ├── gddpm_joint_240.yaml        # Baseline: Conditional DDIM
 │   └── moe_joint_server.yaml       # Negative Evidence: Organ-MoE soft routing
@@ -46,16 +60,26 @@ DualPrior-BBDM-GitHub/
 │   ├── kidney_train_filelist.txt   # 2,000 train / 194 val / 800 test filenames
 │   ├── brain_train_filelist.txt    # 4,000 train / 863 val / 1,000 test filenames
 │   └── breast_test_blind_filelist.txt # 5,636 blind test filenames
-├── Datasets_demo/                  # 2 paired demo patches per organ (8 pairs total) for smoke testing
-├── datasets/                       # Multi-organ paired dataset loaders & polarity/photometric transforms
-├── model/                          # Swin-UNet BBDM, UNI SpatialPriorInjector & CONCH TextureCrossAttention
-├── runners/                        # Training, checkpointing, and 6-step/2-step bridge sampling loops
+├── datasets/                       # Multi-organ paired dataset loaders & stain augmentations
+│   ├── custom.py                   # Paired multi-organ dataset with polarity transforms
+│   └── stain_aug.py                # Ruifrok-Beer-Lambert optical stain augmentor (StainAug)
+├── model/                          # Swin-UNet BBDM, UNI SpatialPriorInjector & GRL/MixStyle modules
+│   └── BrownianBridge/
+│       ├── BrownianBridgeModel.py  # Core BBDM with dual-prior, GRL, and MLDG support
+│       ├── grl.py                  # Gradient Reversal Layer & Domain Discriminator (DANN)
+│       └── mixstyle.py             # Feature statistics mixer (MixStyle)
+├── runners/                        # Training, SWAD optimization, and 6-step/2-step sampling loops
+│   ├── BaseRunner.py               # Base runner with dense stochastic weight averaging (SWAD)
+│   └── DiffusionBasedModelRunners/
+│       └── BBDMRunner.py           # Multi-organ BBDM training and test runner
 ├── main.py                         # Unified entry point for training and testing
 ├── precompute_uni.py               # Offline UNI dense token extraction (accelerates training)
 ├── build_conch_bank.py             # Offline source-only CONCH memory bank builder
+├── gen_breast_server.py            # High-throughput server-side 6-step batch sampler
 ├── gen_cross.py                    # Cross-organ zero-shot inference & polarity alignment script
 ├── eval_lib.py                     # Core evaluation & Beer-Lambert OD site calibration library
-└── official_eval.py                # 4-Level automated evaluation script (PSNR/SSIM/LPIPS/FID/KID/Dice/PCC)
+├── fast_official_eval.py           # Fast 4-level evaluator with precomputed GT Cellpose mask cache
+└── official_eval.py                # Standalone 4-level automated pathology evaluation script
 ```
 
 ---
@@ -65,8 +89,7 @@ DualPrior-BBDM-GitHub/
 ### Data Availability Statement (数据可用性说明)
 - **Full Raw Dataset (全量原始数据)**: The complete multi-organ paired PI$\to$H&E dataset (**15,222 paired patches** across Liver, Kidney, Brain, and Breast) was acquired under institutional collaboration protocols at Hainan University. Due to institutional data privacy policies, the full raw image archive is not hosted directly in this public repository, but is available from the corresponding author upon reasonable academic request and advisor approval.
 - **Reproducibility Assets Included Here (本仓库已公开的复现资产)**:
-  1. **`data_splits/`**: Exact deterministic file lists (`*_filelist.txt`) and optical polarity metadata (`dataset_manifest.json`) for every split of all 4 organs.
-  2. **`Datasets_demo/`**: 2 representative paired `input` (PI) and `target` (H&E) images per organ so users and reviewers can immediately verify the code pipeline out-of-the-box. *(Note: If strict zero-image hosting is required prior to publication, simply remove `Datasets_demo/` before pushing).*
+  - **`data_splits/`**: Exact deterministic file lists (`*_filelist.txt`) and optical polarity metadata (`dataset_manifest.json`) for every split of all 4 organs.
 
 | Organ (器官) | Role (角色) | Train (训练) | Val (验证) | Test (测试) | Native PI Polarity (原生 PI 极性约定) |
 | :--- | :--- | :---: | :---: | :---: | :--- |
@@ -90,7 +113,7 @@ Datasets_processed/
 │   ├── train/{input, target}/
 │   ├── val/{input, target}/
 │   └── test/{input, target}/
-└── Breast/
+└── Breast_all/
     ├── input/
     └── target/
 ```
@@ -115,33 +138,63 @@ python precompute_uni.py --data_root /path/to/Datasets_processed --out_dir ./fea
 python build_conch_bank.py --data_root /path/to/Datasets_processed --out_dir ./feat_cache_dir
 ```
 
-### 4.3 Training (190k-Step Controlled Protocol / 模型训练)
+### 4.3 Training Main Dual-Prior BBDM (主模型训练，190k 步受控)
 ```bash
 # Train 3-Organ Joint Dual-Prior BBDM (Main Model)
 CUDA_VISIBLE_DEVICES=0 python main.py -c configs/full_e3.yaml --train --gpu_ids 0
 
-# Train Single-Organ Donor Models (190k steps)
+# Train Single-Organ Donor Models
 CUDA_VISIBLE_DEVICES=0 python main.py -c configs/base_liver_server.yaml --train --gpu_ids 0
 CUDA_VISIBLE_DEVICES=0 python main.py -c configs/base_kidney_server.yaml --train --gpu_ids 0
 CUDA_VISIBLE_DEVICES=0 python main.py -c configs/base_brain_server.yaml --train --gpu_ids 0
 ```
 
-### 4.4 Cross-Organ Zero-Shot Inference & 4-Level Evaluation (跨器官零样本推理与四维评测)
+### 4.4 Training Classical Domain Generalization (DG) Baselines (DG 基准复现)
+All DG baselines use the identical `Swin-UNet BBDM` backbone and 190,000 steps controlled schedule:
 ```bash
-# Run cross-organ inference + automatic 4-level evaluation (PSNR, SSIM, LPIPS, FID, KID, Cellpose Dice, H-channel PCC)
-python gen_cross.py configs/base_brain_server.yaml ckpt_cross/brainonly190k.pth kidney 800 brainonly190k_k800 neg
+# DG Class 1: StainAug (Data Diversity & Stain Augmentation)
+CUDA_VISIBLE_DEVICES=0 python main.py -c configs/stainaug_190k_server.yaml --train --gpu_ids 0
 
-# Or directly invoke the standalone 4-level evaluator on any generated folder vs. ground-truth folder
-python official_eval.py \
-    --gen_dir gens_screen/brainonly190k_k800 \
-    --gt_dir eval_kidney/test/B \
-    --out_json official_screen_brainonly190k_k800.json
+# DG Class 2: DANN (Gradient Reversal Layer + 3-Organ Domain Discriminator)
+CUDA_VISIBLE_DEVICES=0 python main.py -c configs/dann_190k_server.yaml --train --gpu_ids 0
+
+# DG Class 3: MixStyle (Feature Statistics Mixing)
+CUDA_VISIBLE_DEVICES=0 python main.py -c configs/mixstyle_190k_server.yaml --train --gpu_ids 0
+
+# DG Class 6: SWAD (Dense Stochastic Weight Averaging on Flat Minima)
+CUDA_VISIBLE_DEVICES=0 python main.py -c configs/swad_190k_server.yaml --train --gpu_ids 0
+```
+
+### 4.5 High-Throughput Batch Inference & Fast Official Evaluation (批量生图与极速官方评测)
+```bash
+# 1. Server-side high-throughput 6-step generation (batch_size=32/64, ~4-6 min for 5,636 patches)
+python gen_breast_server.py configs/dann_190k_server.yaml results/ws300-e3/DANN-190K/checkpoint/last_model.pth 5636 64 dann_190k
+
+# 2. Fast 4-level official evaluation using precomputed GT Cellpose mask cache (~18 min)
+python fast_official_eval.py official_eval/condition gens_screen/dann_190k official_eval/ground_truth official_screen_dann190k_b5636.json 50
 ```
 
 ---
 
-## 5. Key Benchmark Results (24-Cell Donor × Recipient Matrix at 190k Steps)
+## 5. Benchmark Results / 核心实验基准
 
+### 5.1 Controlled Cross-Organ DG Benchmark on 5,636 Unseen Breast Images (论文表 3 Panel A)
+All models trained on 3 source organs (**Liver, Kidney, Brain**; 9,000 pairs) under 190,000 steps controlled schedule, evaluated on **5,636 blind breast patches**:
+
+| Model Configuration / DG Category | Reference | PSNR (dB)↑ | SSIM↑ | LPIPS↓ | FID↓ | Cellpose Dice↑ | H-channel PCC↑ |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Pix2Pix** (1 step) | CVPR 2017 (Isola) | 15.23 | 0.665 | 0.286 | 75.76 | 0.536 | 0.818 |
+| **CycleGAN** (1 step) | ICCV 2017 (Zhu) | 10.18 | -0.001 | 0.505 | 134.02 | 0.024 | -0.654 |
+| **Conditional DDIM** (50 steps) | ICLR 2021 (Song) | 12.42 | 0.570 | 0.360 | 78.65 | 0.504 | 0.739 |
+| **I2SB Schrödinger Bridge** (20 steps) | ICML 2023 (Chen) | 16.23 | 0.747 | 0.222 | 42.93 | 0.549 | 0.833 |
+| **Ablation: Base Backbone** (6 steps) | Swin-UNet BBDM | 16.57 | 0.757 | 0.215 | 38.99 | 0.535 | 0.835 |
+| **DG Class 1: StainAug** (6 steps) | IEEE TMI 2019 (Tellez) | 15.93 | 0.756 | 0.222 | 40.99 | 0.541 | 0.831 |
+| **DG Class 2: DANN** (6 steps) | JMLR 2016 (Ganin) | 14.35 | 0.741 | 0.276 | 52.40 | 0.535 | 0.774 |
+| **DG Class 6: SWAD** (6 steps) | NeurIPS 2021 (Cha) | 15.71 | 0.741 | 0.244 | 44.39 | 0.528 | 0.794 |
+| **DualPrior (Ours)** (6 steps) | This work | 18.31 | 0.783 | **0.210** | **38.23** | 0.546 | 0.861 |
+| **DualPrior (Ours)** (2 steps) | This work (Fast Sampling) | **18.47** | **0.785** | 0.211 | 42.24 | **0.551** | **0.865** |
+
+### 5.2 24-Cell Donor × Recipient Matrix (PSNR in dB at 190k Steps)
 PSNR (dB) across all 4 donors (`Liver-only`, `Kidney-only`, `Brain-only`, `3-Organ Joint`) and 4 recipients (`Liver`, `Kidney`, `Brain`, `Held-Out Breast`):
 
 | Donor Model (190k steps) | $\to$ Liver (750) | $\to$ Kidney (800) | $\to$ Brain (1000) | $\to$ **Breast (5636, Held-Out)** |
@@ -156,3 +209,13 @@ PSNR (dB) across all 4 donors (`Liver-only`, `Kidney-only`, `Brain-only`, `3-Org
 ## 6. License & Citation / 开源协议与引用
 
 This code is released under the MIT License (see [`LICENSE`](./LICENSE)). Foundation model weights (**UNI** and **CONCH**) are subject to the Mahmood Lab non-commercial academic license on HuggingFace.
+
+If you find this work or benchmark useful for your research, please cite:
+```bibtex
+@article{wang2026dualprior,
+  title={Input Polarity and Stain Statistics: Controlled Attribution and a Dual-Prior Brownian Bridge Diffusion Framework for Cross-Organ Zero-Shot Virtual Staining},
+  author={Wang, Dabin and Ma, Li and collaborators},
+  journal={IEEE Transactions on Medical Imaging (Under Review)},
+  year={2026}
+}
+```

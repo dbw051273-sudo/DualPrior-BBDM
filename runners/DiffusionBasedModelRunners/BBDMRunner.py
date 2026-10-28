@@ -17,6 +17,7 @@ from runners.utils import weights_init, get_optimizer, get_dataset, make_dir, ge
 
 
 @Registers.runners.register_with_name('BBDMRunner')
+@Registers.runners.register_with_name('BBDMSWADRunner')
 class BBDMRunner(DiffusionBaseRunner):
     def __init__(self, config):
         super().__init__(config)

@@ -19,6 +19,7 @@ from tqdm.autonotebook import tqdm
 # from evaluation.FID import calc_FID
 # from evaluation.LPIPS import calc_LPIPS
 from runners.base.EMA import EMA
+from runners.base.SWAD import SWAD
 from runners.utils import make_save_dirs, make_dir, get_dataset, remove_file
 
 
@@ -69,6 +70,20 @@ class BaseRunner(ABC):
             self.start_ema_step = self.config.model.EMA.start_ema_step
             self.apply_ema_during_training = getattr(self.config.model.EMA, 'apply_during_training', True)
             self.ema.register(self.net)
+
+        # initialize SWAD (Stochastic Weight Averaging Densely, NeurIPS 2021)
+        self.use_swad = getattr(self.config.training, 'use_swad', False)
+        if self.use_swad:
+            swad_cfg = getattr(self.config.training, 'swad', {})
+            start_step = getattr(swad_cfg, 'start_step', 30000)
+            update_interval = getattr(swad_cfg, 'update_interval', 100)
+            loss_threshold = getattr(swad_cfg, 'loss_threshold', 0.045)
+            shadow_device = getattr(swad_cfg, 'shadow_device', 'cpu')
+            self.swad = SWAD(start_step=start_step,
+                             update_interval=update_interval,
+                             loss_threshold=loss_threshold,
+                             shadow_device=shadow_device)
+            self.logger(f"===> [SWAD 启用] start_step={start_step}, interval={update_interval}, loss_thresh={loss_threshold}, device={shadow_device}")
 
         # load model from checkpoint
         self.load_model_from_checkpoint()
@@ -128,6 +143,14 @@ class BaseRunner(ABC):
                 self.ema.shadow = model_states['ema']
                 self.ema.reset_device(self.net)
 
+            # load swad
+            if getattr(self, 'use_swad', False) and 'swad' in model_states and model_states['swad'] is not None:
+                self.swad.shadow = model_states['swad']
+                self.swad.n_averaged = model_states.get('swad_n', 0)
+                self.swad.actual_start_step = model_states.get('swad_start_step', None)
+                self.swad.active = self.swad.n_averaged > 0
+                self.logger(f"[SWAD 恢复断点] 成功恢复已平均 {self.swad.n_averaged} 个权重的 SWAD 状态")
+
             # load optimizer and scheduler
             if self.config.args.train:
                 if self.config.model.__contains__('optim_sche_load_path') and self.config.model.optim_sche_load_path is not None:
@@ -170,7 +193,22 @@ class BaseRunner(ABC):
 
         if self.use_ema:
             model_states['ema'] = self.ema.shadow
+
+        if getattr(self, 'use_swad', False) and self.swad.n_averaged > 0:
+            model_states['swad'] = self.swad.shadow
+            model_states['swad_n'] = self.swad.n_averaged
+            model_states['swad_start_step'] = self.swad.actual_start_step
+
         return model_states, optimizer_scheduler_states
+
+    # SWAD part (Stochastic Weight Averaging Densely, NeurIPS 2021)
+    def step_swad(self, current_loss=0.0):
+        if not getattr(self, 'use_swad', False):
+            return
+        model = self.net.module if (self.config.training.use_DDP and hasattr(self.net, 'module')) else self.net
+        updated = self.swad.update(model, step=self.global_step, loss=current_loss)
+        if updated and self.is_main_process and (self.swad.n_averaged == 1 or self.swad.n_averaged % 100 == 0):
+            self.logger(f"[SWAD 密集平均] Step {self.global_step} | 累计平均 {self.swad.n_averaged} 个平坦低谷模型权重 | Loss: {current_loss:.4f}")
 
     # EMA part
     def step_ema(self):
@@ -443,13 +481,13 @@ class BaseRunner(ABC):
                             if self.is_main_process:
                                 # 格式化打印，保留4位小数
                                 print(
-                                    f"🔍 [真实梯度监测] Step {self.global_step} | Real Grad Norm: {real_grad_norm.item():.4f}")
+                                    f"[真实梯度监测] Step {self.global_step} | Real Grad Norm: {real_grad_norm.item():.4f}")
 
                             # ⚠️ [高能预警] 唯一的保险措施 (建议保留注释，如果你想彻底裸奔就删掉)
                             # 如果真的出现 NaN (梯度炸没了)，这步 update 会直接毁掉模型。
                             # 如果你想观察什么时候炸，可以不加下面这个判断，直接让它炸。
                             if torch.isnan(real_grad_norm) or torch.isinf(real_grad_norm):
-                                print(f"💀 [危险] 检测到梯度爆炸 (NaN/Inf)！模型参数即将被污染！")
+                                print(f"[危险] 检测到梯度爆炸 (NaN/Inf)！模型参数即将被污染！")
 
                             self.optimizer[i].step()
                             self.optimizer[i].zero_grad()
@@ -470,6 +508,10 @@ class BaseRunner(ABC):
 
                     if self.use_ema and self.global_step % (self.update_ema_interval*accumulate_grad_batches) == 0:
                         self.step_ema()
+
+                    if getattr(self, 'use_swad', False) and self.global_step % (self.swad.update_interval * accumulate_grad_batches) == 0:
+                        loss_val = losses[0].item() if (len(losses) > 0 and hasattr(losses[0], 'item')) else 0.0
+                        self.step_swad(current_loss=loss_val)
 
                     if len(self.optimizer) > 1:
                         pbar.set_description(
@@ -503,15 +545,20 @@ class BaseRunner(ABC):
                                 self.sample_step(val_batch=val_batch, train_batch=train_batch)
                                 torch.cuda.empty_cache()
 
-                    # ===== 步级 checkpoint（save_freq，含 EMA 影子权重）=====
+                    # ===== 步级 checkpoint（save_freq，含 EMA 与 SWAD 权重）=====
                     _save_freq = getattr(self.config.training, 'save_freq', None)
                     if _save_freq is not None and self.is_main_process and self.global_step % int(_save_freq) == 0:
                         with torch.no_grad():
                             _ckpt = os.path.join(self.config.result.ckpt_path, f'model_step_{self.global_step}.pth')
                             model_states, _ = self.get_checkpoint_states(stage='epoch_end')
-                            torch.save({'model': model_states['model'],
-                                        'ema': model_states.get('ema'),
-                                        'step': self.global_step}, _ckpt)
+                            _ckpt_data = {'model': model_states['model'],
+                                          'ema': model_states.get('ema'),
+                                          'step': self.global_step}
+                            if 'swad' in model_states:
+                                _ckpt_data['swad'] = model_states['swad']
+                                _ckpt_data['swad_n'] = model_states['swad_n']
+                                _ckpt_data['swad_start_step'] = model_states['swad_start_step']
+                            torch.save(_ckpt_data, _ckpt)
                             self.logger(f"saved step checkpoint: model_step_{self.global_step}.pth")
 
                 end_time = time.time()

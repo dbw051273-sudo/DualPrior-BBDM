@@ -100,27 +100,34 @@ class BrownianBridgeModel(nn.Module):
                 self.uni_encoder = UNIEncoder(freeze=True)
             else:
                 self.uni_encoder = None
-
-            # ===== GRL 域适应组件（Re-BBDM）=====
-            self.use_grl = getattr(model_params, "use_grl", False)
-            if self.use_grl:
-                self.domain_projector = DomainProjector(dim=1024, hidden_dim=512)
-                self.grl = GradientReversalLayer()
-                self.domain_discriminator = DomainDiscriminator(
-                    in_dim=1024, hidden_dim=getattr(model_params, "disc_hidden_dim", 256),
-                    num_classes=getattr(model_params, "num_organs", 3)
-                )
-                self.adv_weight = getattr(model_params, "adv_weight", 0.05)
-                self.grl_gamma = getattr(model_params, "grl_gamma", 10.0)
-                self.adv_start_step = getattr(model_params, "adv_start_step", self.warmup_steps if hasattr(self, 'warmup_steps') else 1000)
-                self.grl_total_steps = getattr(model_params, "grl_total_steps", 50000)
-            else:
-                self.domain_projector = None
-                self.grl = None
-                self.domain_discriminator = None
         else:
             self.uni_encoder = None
-            self.use_grl = False
+
+        # ===== MLDG (AAAI 2018) 元学习与情景训练组件 =====
+        self.use_mldg = getattr(model_params, "use_mldg", False)
+        self.mldg_beta = getattr(model_params, "mldg_beta", 1.0)
+
+        # ===== GRL 域适应 / DANN 组件（支持 UNI 模式与 Swin 纯基座模式）=====
+        self.use_grl = getattr(model_params, "use_grl", False)
+        if self.use_grl:
+            disc_in_dim = 1024 if self.use_uni else getattr(model_params, "grl_feat_dim", 2048)
+            self.grl = GradientReversalLayer()
+            self.domain_discriminator = DomainDiscriminator(
+                in_dim=disc_in_dim, hidden_dim=getattr(model_params, "disc_hidden_dim", 256),
+                num_classes=getattr(model_params, "num_organs", 3)
+            )
+            self.adv_weight = getattr(model_params, "adv_weight", 0.05)
+            self.grl_gamma = getattr(model_params, "grl_gamma", 10.0)
+            self.adv_start_step = getattr(model_params, "adv_start_step", self.warmup_steps if hasattr(self, 'warmup_steps') else 4000)
+            self.grl_total_steps = getattr(model_params, "grl_total_steps", 162000)
+            if self.use_uni:
+                self.domain_projector = DomainProjector(dim=1024, hidden_dim=512)
+            else:
+                self.domain_projector = None
+        else:
+            self.domain_projector = None
+            self.grl = None
+            self.domain_discriminator = None
 
         self.denoise_fn = UNetModel(**vars(model_params.UNetParams), **uni_kwargs)
 
@@ -597,7 +604,31 @@ class BrownianBridgeModel(nn.Module):
             f_style=f_style,
         )
 
-        recloss = (objective - objective_recon).abs().mean()
+        if getattr(self, "use_mldg", False) and self.training and organ_label is not None:
+            val_organ = self.step_counter.item() % 3
+            val_mask = (organ_label == val_organ)
+            train_mask = (organ_label != val_organ)
+            elem_loss = (objective - objective_recon).abs().mean(dim=[1, 2, 3])
+            if train_mask.any() and val_mask.any():
+                l_tr = elem_loss[train_mask].mean()
+                l_te = elem_loss[val_mask].mean()
+                recloss = l_tr + self.mldg_beta * l_te
+                log_aux["mldg_tr"] = float(l_tr.detach())
+                log_aux["mldg_te"] = float(l_te.detach())
+            else:
+                recloss = elem_loss.mean()
+        else:
+            recloss = (objective - objective_recon).abs().mean()
+
+        # ===== DANN (Base + GRL) 瓶颈特征对抗 =====
+        if not self.use_uni and self.use_grl and self.training and organ_label is not None and self.step_counter.item() >= self.adv_start_step:
+            grl_lambda = get_dann_lambda(
+                self.step_counter.item() - self.adv_start_step,
+                self.grl_total_steps, self.grl_gamma
+            )
+            if hasattr(self.denoise_fn, 'last_bottleneck') and self.denoise_fn.last_bottleneck is not None:
+                rev_feat = self.grl(self.denoise_fn.last_bottleneck, grl_lambda)
+                domain_logits = self.domain_discriminator(rev_feat)
 
         x0_recon = self.predict_x0_from_objective(
             x_t,
@@ -854,9 +885,11 @@ class BrownianBridgeModel(nn.Module):
         # GRL 在所有主训练中从未生效（证据：两次不同 adv_weight 的 checkpoint
         # 投影器权重 bit 级相同；adv_loss 恒约 ln(3)=1.099 = 随机分类器签名）。
         extra = []
-        if self.use_grl and self.domain_projector is not None:
-            extra += list(self.domain_projector.parameters())
-            extra += list(self.domain_discriminator.parameters())
+        if self.use_grl:
+            if self.domain_projector is not None:
+                extra += list(self.domain_projector.parameters())
+            if self.domain_discriminator is not None:
+                extra += list(self.domain_discriminator.parameters())
         if self.use_aux_loss and hasattr(self, "log_vars"):
             extra += [self.log_vars]
         if extra:
