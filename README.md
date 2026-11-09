@@ -204,6 +204,25 @@ PSNR (dB) across all 4 donors (`Liver-only`, `Kidney-only`, `Brain-only`, `3-Org
 | **Brain-only** (Native / Polarity-Aligned / Site-Calibrated) | 9.57 / 13.98 / — | 14.80 / 14.80 / — | *25.58* / — / — | 13.28 / 13.28 / **23.39** |
 | **3-Organ Joint (Ours)** (Native / Polarity-Aligned / Site-Calibrated) | *27.69* / — / — | *25.58* / — / — | *26.41* / — / — | 18.31 / 18.31 / **22.37** |
 
+### 5.3 Strict Three-Source Organ Rotations / 严格三源留一器官轮转
+
+The current UniPrior manuscript uses frozen UNI spatial conditioning without CONCH retrieval or UNI auxiliary losses as its default method. DualPrior is the UNI + CONCH comparison. The tables above retain the original DualPrior benchmark.
+
+For each rotation below, the other three organs provide training and validation data. Breast uses its separate training and validation splits when it is a source. Base and UniPrior were trained for 190,000 steps and evaluated on the same held-out image pairs using six sampling steps. Values are from one training run per configuration.
+
+| Held-out organ | Test pairs | Model | PSNR (dB) ↑ | SSIM ↑ | LPIPS ↓ | FID ↓ | KID ↓ | CP-SAM v2 Dice ↑ | MSE ↓ | L1 ↓ | PI PCC |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Brain | 1000 | Base | 17.08 | 0.7019 | 0.2008 | 47.90 | 0.04669 | 0.7203 | 0.02763 | 0.12345 | 0.8247 |
+| Brain | 1000 | UniPrior (no auxiliary losses) | 16.52 | 0.7017 | 0.1911 | 36.73 | 0.03090 | 0.7251 | 0.03049 | 0.13323 | 0.7900 |
+| Kidney | 800 | Base | 16.16 | 0.7499 | 0.2177 | 53.87 | 0.03757 | 0.6842 | 0.02666 | 0.12062 | 0.9108 |
+| Kidney | 800 | UniPrior (no auxiliary losses) | 19.78 | 0.7961 | 0.1539 | 36.62 | 0.02053 | 0.6887 | 0.01229 | 0.07802 | 0.8761 |
+| Liver | 750 | Base | 20.83 | 0.7391 | 0.1962 | 42.09 | 0.02804 | 0.6511 | 0.00995 | 0.07800 | -0.8522 |
+| Liver | 750 | UniPrior (no auxiliary losses) | 21.12 | 0.7416 | 0.1835 | 33.58 | 0.02514 | 0.6021 | 0.00960 | 0.07471 | -0.8563 |
+
+Dice measures overlap between binary foreground masks from Cellpose 4.2.1.1 (CP-SAM v2). PI PCC measures grayscale correlation between generated H&E and input PI. These definitions apply to this rotation table.
+
+UniPrior reduces FID and LPIPS in all three rotations. For held-out liver, FID decreases from 42.09 to 33.58 while Dice decreases from 0.6511 to 0.6021. The scores alone cannot separate errors in nuclear morphology or position from changes in segmentation response to stain or contrast.
+
 ---
 
 ## 6. License & Citation / 开源协议与引用
