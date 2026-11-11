@@ -141,7 +141,7 @@ python build_conch_bank.py --data_root /path/to/Datasets_processed --out_dir ./f
 ### 4.3 Training Main Dual-Prior BBDM (主模型训练，190k 步受控)
 ```bash
 # Train 3-Organ Joint Dual-Prior BBDM (Main Model)
-CUDA_VISIBLE_DEVICES=0 python main.py -c configs/full_e3.yaml --train --gpu_ids 0
+CUDA_VISIBLE_DEVICES=0 python main.py -c configs/full_e3.yaml --train --gpu_ids 0 --max_steps 190000
 
 # Train Single-Organ Donor Models
 CUDA_VISIBLE_DEVICES=0 python main.py -c configs/base_liver_server.yaml --train --gpu_ids 0
