@@ -44,6 +44,12 @@ class BBDMRunner(DiffusionBaseRunner):
                 for o in organs]
         except AttributeError:
             net._train_organ_map = None
+        is_dg_reproduction = config.runner == 'BBDMFOMLDGRunner' or (
+            getattr(config.training, 'use_swad', False)
+            and getattr(config.training.swad, 'mode', '') == 'val_overfit'
+        )
+        if is_dg_reproduction and config.model.model_type == 'BBDM':
+            net.create_task_emb_proj(net.channels, config.training.device[0])
         net.apply(weights_init)
         return net
 
@@ -427,3 +433,32 @@ class BBDMRunner(DiffusionBaseRunner):
             self.ema.restore(net)
             if self.is_main_process:
                 self.logger("✅ [指标评测] 推理完成，模型状态已恢复")
+
+
+@Registers.runners.register_with_name('BBDMFOMLDGRunner')
+class BBDMFOMLDGRunner(BBDMRunner):
+    def loss_fn(self, net, batch, epoch, step, opt_idx=0, stage='train', write=True):
+        from runners.base.first_order import first_order_step
+
+        end = self.config.training.task1_end_step
+        if stage != 'train' or opt_idx != 0 or (step < end and (step // 4) % 2):
+            return super().loss_fn(net, batch, epoch, step, opt_idx, stage, write)
+        (target, _), (condition, _), labels = batch
+        held = labels == step % 3
+        if set(labels.tolist()) != {0, 1, 2} or int(held.sum()) != 2:
+            raise RuntimeError(f'Unexpected meta-batch at {step}: {labels.tolist()}')
+
+        def loss(mask):
+            x = target[mask].to(self.config.training.device[0])
+            y = condition[mask].to(self.config.training.device[0])
+            net._feat_keys = None
+            return net(x, y, current_task_id=0, teacher_y=x, teacher_context=x,
+                       organ_label=labels[mask].to(x.device))[0]
+
+        cfg = self.config.model.BB.params
+        tr, te = first_order_step(net, lambda: loss(~held), lambda: loss(held),
+                                  cfg.fomldg_inner_lr, cfg.mldg_beta, cfg.fomldg_backup_device)
+        if write and self.is_main_process:
+            self.writer.add_scalar('fomldg/meta_train', tr, step)
+            self.writer.add_scalar('fomldg/meta_test', te, step)
+        return tr + cfg.mldg_beta * te

@@ -20,6 +20,7 @@ from tqdm.autonotebook import tqdm
 # from evaluation.LPIPS import calc_LPIPS
 from runners.base.EMA import EMA
 from runners.base.SWAD import SWAD
+from runners.base.loss_valley import LossValley
 from runners.utils import make_save_dirs, make_dir, get_dataset, remove_file
 
 
@@ -73,7 +74,12 @@ class BaseRunner(ABC):
 
         # initialize SWAD (Stochastic Weight Averaging Densely, NeurIPS 2021)
         self.use_swad = getattr(self.config.training, 'use_swad', False)
-        if self.use_swad:
+        self.use_loss_valley = self.use_swad and getattr(config.training.swad, 'mode', '') == 'val_overfit'
+        if self.use_loss_valley:
+            if config.training.use_DDP or config.training.accumulate_grad_batches != 1:
+                raise ValueError('LossValley requires single-device training without gradient accumulation')
+            self.swad = LossValley(config.training.swad)
+        elif self.use_swad:
             swad_cfg = getattr(self.config.training, 'swad', {})
             start_step = getattr(swad_cfg, 'start_step', 30000)
             update_interval = getattr(swad_cfg, 'update_interval', 100)
@@ -144,7 +150,13 @@ class BaseRunner(ABC):
                 self.ema.reset_device(self.net)
 
             # load swad
-            if getattr(self, 'use_swad', False) and 'swad' in model_states and model_states['swad'] is not None:
+            if self.use_loss_valley:
+                if model_states.get('swad_state') is None:
+                    if self.global_step > self.swad.start_step:
+                        raise ValueError('Missing loss-valley state for SWAD continuation')
+                else:
+                    self.swad.load_state_dict(model_states['swad_state'], self.config.training.device[0])
+            elif self.use_swad and model_states.get('swad') is not None:
                 self.swad.shadow = model_states['swad']
                 self.swad.n_averaged = model_states.get('swad_n', 0)
                 self.swad.actual_start_step = model_states.get('swad_start_step', None)
@@ -194,10 +206,15 @@ class BaseRunner(ABC):
         if self.use_ema:
             model_states['ema'] = self.ema.shadow
 
-        if getattr(self, 'use_swad', False) and self.swad.n_averaged > 0:
+        if self.use_loss_valley:
+            model_states['swad_state'] = self.swad.state_dict()
+        if self.use_swad and self.swad.n_averaged > 0 and (not self.use_loss_valley or self.swad.finalized):
             model_states['swad'] = self.swad.shadow
             model_states['swad_n'] = self.swad.n_averaged
             model_states['swad_start_step'] = self.swad.actual_start_step
+            if self.use_loss_valley:
+                model_states['swad_end_step'] = self.swad.actual_end_step
+                model_states['swad_val_history'] = self.swad.val_history
 
         return model_states, optimizer_scheduler_states
 
@@ -209,6 +226,32 @@ class BaseRunner(ABC):
         updated = self.swad.update(model, step=self.global_step, loss=current_loss)
         if updated and self.is_main_process and (self.swad.n_averaged == 1 or self.swad.n_averaged % 100 == 0):
             self.logger(f"[SWAD 密集平均] Step {self.global_step} | 累计平均 {self.swad.n_averaged} 个平坦低谷模型权重 | Loss: {current_loss:.4f}")
+
+    @torch.no_grad()
+    def compute_full_val_loss(self, val_loader):
+        was_training = self.net.training
+        device = self.config.training.device[0]
+        devices = [device] if device.type == 'cuda' else []
+        self.net.eval()
+        try:
+            total = count = 0
+            with torch.random.fork_rng(devices=devices):
+                torch.random.default_generator.manual_seed(4701)
+                if devices:
+                    torch.cuda.manual_seed(4701)
+                for batch in val_loader:
+                    with torch.autocast(device.type, dtype=torch.bfloat16,
+                                        enabled=self.use_amp and device.type == 'cuda'):
+                        loss = self.loss_fn(self.net, batch, self.global_epoch, self.global_step,
+                                            stage='val', write=False)
+                    size = batch[0][0].shape[0]
+                    total += size * loss.item()
+                    count += size
+            if not count:
+                raise RuntimeError('Source validation set is empty')
+            return total / count
+        finally:
+            self.net.train(was_training)
 
     # EMA part
     def step_ema(self):
@@ -423,13 +466,20 @@ class BaseRunner(ABC):
                                     batch_size=self.config.data.val.batch_size,
                                     shuffle=self.config.data.val.shuffle,
                                     num_workers=_nw,
-                                    drop_last=True)
+                                    drop_last=not self.use_loss_valley)
             test_loader = DataLoader(test_dataset,
                                      batch_size=self.config.data.test.batch_size,
                                      shuffle=False,
                                      num_workers=_nw,
                                      drop_last=True)
 
+        if self.config.runner == 'BBDMFOMLDGRunner':
+            if self.config.training.use_DDP or self.config.training.accumulate_grad_batches != 1:
+                raise ValueError('FOMLDG requires single-device training without gradient accumulation')
+            from runners.base.first_order import OrganBatchSampler
+            train_loader = DataLoader(train_dataset,
+                                      batch_sampler=OrganBatchSampler(train_dataset.samples, self.global_step),
+                                      num_workers=_nw)
         epoch_length = len(train_loader)
         start_epoch = self.global_epoch
         self.logger(f"start training {self.config.model.model_name} on {self.config.data.dataset_name}, {len(train_loader)} iters per epoch")
@@ -471,7 +521,8 @@ class BaseRunner(ABC):
                                                 opt_idx=i,
                                                 stage='train')
 
-                        loss.backward()
+                        if loss.requires_grad or self.config.runner != 'BBDMFOMLDGRunner':
+                            loss.backward()
                         if self.global_step % accumulate_grad_batches == 0:
                             _clip_norm = getattr(self.config.training, 'grad_clip_norm', None)
                             real_grad_norm = torch.nn.utils.clip_grad_norm_(self.net.parameters(),
@@ -509,7 +560,17 @@ class BaseRunner(ABC):
                     if self.use_ema and self.global_step % (self.update_ema_interval*accumulate_grad_batches) == 0:
                         self.step_ema()
 
-                    if getattr(self, 'use_swad', False) and self.global_step % (self.swad.update_interval * accumulate_grad_batches) == 0:
+                    if self.use_loss_valley:
+                        if not self.swad.stopped:
+                            step = self.global_step
+                            self.swad.collect(self.net, step)
+                            offset = step - self.swad.start_step
+                            if offset > 0 and (offset % self.swad.eval_freq == 0 or step == self.config.training.n_steps):
+                                value = self.compute_full_val_loss(val_loader)
+                                self.swad.on_validation(step, value)
+                                self.writer.add_scalar('swad/full_val_loss', value, step)
+                                self.logger(f'SWAD validation at {step}: {value:.6f}, accepted={self.swad.n_averaged}, stopped={self.swad.stopped}')
+                    elif self.use_swad and self.global_step % (self.swad.update_interval * accumulate_grad_batches) == 0:
                         loss_val = losses[0].item() if (len(losses) > 0 and hasattr(losses[0], 'item')) else 0.0
                         self.step_swad(current_loss=loss_val)
 
@@ -579,9 +640,12 @@ class BaseRunner(ABC):
                 # save checkpoint
                 if (epoch + 1) % self.config.training.save_interval == 0 or \
                         (epoch + 1) == self.config.training.n_epochs or \
-                        self.global_step > self.config.training.n_steps:
+                        self.global_step >= self.config.training.n_steps:
                     if self.is_main_process:
                         with torch.no_grad():
+                            if self.use_loss_valley and self.global_step == self.config.training.n_steps:
+                                self.swad.finalize()
+                                self.logger(f'SWAD final: {self.swad.actual_start_step}–{self.swad.actual_end_step}, n={self.swad.n_averaged}, fallback={self.swad.fallback}')
                             self.logger("saving latest checkpoint...")
                             self.on_save_checkpoint(self.net, train_loader, val_loader, epoch, self.global_step)
                             model_states, optimizer_scheduler_states = self.get_checkpoint_states(stage='epoch_end')
@@ -662,6 +726,8 @@ class BaseRunner(ABC):
             print('repr(e):\t', repr(e))
             print('traceback.print_exc():')
             traceback.print_exc()
+            if self.use_loss_valley or self.config.runner == 'BBDMFOMLDGRunner':
+                raise
             print('traceback.format_exc():\n%s' % traceback.format_exc())
 
     @torch.no_grad()

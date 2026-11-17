@@ -1,0 +1,22 @@
+{
+  "protocol": "Three source organs; held-out breast; 190000 train updates; six-step sampling",
+  "pcc": "Generated H&E vs input PI, signed",
+  "fomldg": {
+    "n": 5636,
+    "psnr": 17.109707759377404,
+    "ssim": 0.7732255887702858,
+    "lpips": 0.21863609833564845,
+    "fid": 39.25193405151367,
+    "nuclei_dice": 0.5474903553932002,
+    "pcc": 0.825673632603998
+  },
+  "swad_lossvalley": {
+    "n": 5636,
+    "psnr": 15.449227133546103,
+    "ssim": 0.7455205101628224,
+    "lpips": 0.23738870515657962,
+    "fid": 42.87961196899414,
+    "nuclei_dice": 0.5402895385063847,
+    "pcc": 0.8062695340802688
+  }
+}
