@@ -26,6 +26,9 @@ from natsort import natsorted
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
 # ==========================================
 # 官方标准像素指标函数 (严格逐行一致)
 # ==========================================
@@ -150,7 +153,7 @@ def main():
 
     # 初始化模型
     print("正在初始化评估模型 (LPIPS AlexNet, InceptionV3 FID/KID, Cellpose Nuclei)...")
-    lpips_metric = LearnedPerceptualImagePatchSimilarity(net_type='alex', normalize=True).to(device)
+    lpips_metric = LearnedPerceptualImagePatchSimilarity(net_type='alex', normalize=True, reduction='none').to(device)
     lpips_metric.eval()
     cell_model = models.CellposeModel(gpu=torch.cuda.is_available(), model_type='nuclei')
     fid = FrechetInceptionDistance(feature=2048, normalize=True).to(device)
