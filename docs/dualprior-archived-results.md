@@ -25,3 +25,18 @@ The earlier figure displayed DualPrior as the three-source model. The revised fi
 Values are PSNR in dB. Across the three single-source donors (liver, kidney, brain) and DualPrior, the observed max–min spans were 6.76, 1.72, and 0.72 dB for P0, P2, and P3, respectively. With UNI-StainDG in the four-model comparison, the spans are 6.76, 1.72, and 1.10 dB. Each span summarizes the observed model scores under its own reference condition.
 
 The historical 2-, 6-, 20-, and 200-step sweep used DualPrior. The six-step UNI-StainDG result is a single measured operating point.
+
+## Source-only CONCH retrieval and decoder injection
+
+The optional DualPrior branch uses a frozen CONCH image encoder. For each of 9,000 paired source fields, a 4 × 4 nonoverlapping partition gives 144,000 paired crops. A bank entry stores the L2-normalized CONCH embedding of the source PI crop as its key and the normalized embedding of its paired source H&E crop as its value.
+
+At training and sampling time, the input PI supplies the query. FAISS exact inner-product search retrieves the eight highest-scoring source keys. At the 32 × 32 and 64 × 64 decoder stages, Swin features supply attention queries, and the eight retrieved H&E embeddings supply projected keys and values. For a decoder query q, attention uses softmax(qKᵀ / √d)V. This bank uses source-domain pairs; target H&E reference calibration is a separate post hoc procedure. UNI-StainDG uses the frozen UNI features of the current PI and has no CONCH retrieval branch.
+
+### Fixed-weight retrieval substitution
+
+| Evaluation set | Top-8 PSNR (dB) | Random retrieval PSNR (dB) | Retrieval branch off PSNR (dB) |
+| --- | ---: | ---: | ---: |
+| Breast subset, 1,000 pairs | 17.9176 | 17.9139 | 17.9253 |
+| Within-domain kidney, 800 pairs | 25.580 | 25.581 | — |
+
+These substitutions use the same trained DualPrior weights. Disabling the retrieval branch at inference bypasses its cross-attention operation. UNI-StainDG in the main comparison was trained separately without that branch.
